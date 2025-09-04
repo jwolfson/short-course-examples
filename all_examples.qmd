@@ -7,7 +7,7 @@ format:
 editor: visual
 ---
 
-# Logistic Regression
+# Example 1: Logistic Regression
 
 ```{r}
 library(tidyverse)
@@ -59,112 +59,7 @@ new_pred <- predict(pred_model,
 new_pred
 ```
 
-# Linear Regression & the Lasso
-
-```{r}
-nhis <- read_csv("../../data/nhis_flu_train_21_22.csv") %>%
-  filter(PHSTAT_A != "Unknown") %>%
-  mutate(across(-c(AGEP_A, PCNT18UPTC, PCNTLT18TC), as.factor),
-         HEALTH_STATUS_CTS = factor(PHSTAT_A, 
-                                    levels = c("Poor", "Fair", "Good", "Very Good", "Excellent")) %>% as.integer)
-
-## Do the linear regression
-LM <- lm(HEALTH_STATUS_CTS ~ AGEP_A + SEX_A + PCNT18UPTC + PCNTLT18TC + MARSTAT_A + DIBEV_A + COPDEV_A, data = nhis)
-tidy(LM)
-
-### Get the predictions
-preds <- predict(LM)
-nhis <- nhis %>% mutate(HEALTH_pred = preds)
-
-nhis %>%
-  ggplot(aes(x = HEALTH_pred)) +
-  geom_histogram() +
-#  geom_density() +
-  theme_minimal()
-
-nhis %>%
-  ggplot(aes(x = HEALTH_pred, y = HEALTH_STATUS_CTS)) +
-  geom_point(color = "blue", alpha = 0.3) +
-  geom_smooth(se = FALSE) +
-  geom_abline(slope = 1, intercept = 0, size = 1) +
-  theme_minimal()
-
-
-```
-
-```{r}
-## Do the Lasso
-
-library(glmnet)
-
-Y <- nhis$HEALTH_STATUS_CTS
-X <- model.matrix(LM)
-
-lasso <- glmnet(X, Y, family = "gaussian", alpha = 1)
-print(lasso)
-coef(lasso, s = 0.3)
-coef(lasso, s = 0.1)
-
-lasso_cv <- cv.glmnet(X, Y, family = "gaussian", alpha = 1)
-plot(lasso_cv)
-lasso_cv
-
-coef(lasso, s = lasso_cv$lambda.min)
-coef(lasso, s = lasso_cv$lambda.1se)
-
-preds_lasso <- predict(lasso, newx = X, s = lasso_cv$lambda.1se)
-
-nhis <- nhis %>%
-  mutate(HEALTH_lasso = preds_lasso)
-
-nhis %>%
-  summarise(rmse_LM = sqrt(mean((HEALTH_pred - HEALTH_STATUS_CTS)^2)),
-            rmse_lasso = sqrt(mean((HEALTH_lasso - HEALTH_STATUS_CTS)^2)))
-
-## Try it again with a smaller number of observations
-
-nhis_small <- nhis %>% slice(1:250) %>%
-  filter(SEX_A != "Unknown",
-         MARSTAT_A != "Unknown",
-         DIBEV_A != "Unknown",
-         COPDEV_A != "Unknown")
-nhis_small_test <- nhis %>% slice(251:nrow(nhis)) %>%
-  filter(SEX_A != "Unknown",
-         MARSTAT_A != "Unknown",
-         DIBEV_A != "Unknown",
-         COPDEV_A != "Unknown")
-
-LM <- lm(HEALTH_STATUS_CTS ~ AGEP_A + SEX_A + PCNT18UPTC + PCNTLT18TC + MARSTAT_A + DIBEV_A + COPDEV_A, data = nhis_small)
-tidy(LM)
-
-LM_test <- lm(HEALTH_STATUS_CTS ~ AGEP_A + SEX_A + PCNT18UPTC + PCNTLT18TC + MARSTAT_A + DIBEV_A + COPDEV_A, data = nhis_small_test)
-
-### Get the predictions
-preds <- predict(LM, newdata = nhis_small_test)
-
-Y <- nhis_small$HEALTH_STATUS_CTS
-X <- model.matrix(LM)
-
-lasso <- glmnet(X, Y, family = "gaussian", alpha = 1)
-lasso_cv <- cv.glmnet(X, Y, family = "gaussian", alpha = 1)
-plot(lasso_cv)
-
-preds_lasso <- predict(lasso, newx = model.matrix(LM_test)[, colnames(X)], 
-                       s = lasso_cv$lambda.min)
-
-nhis_small_test <- nhis_small_test %>%
-  mutate(HEALTH_pred = preds,
-         HEALTH_lasso = preds_lasso)
-
-nhis_small_test %>%
-  summarise(rmse_LM = sqrt(mean((HEALTH_pred - HEALTH_STATUS_CTS)^2)),
-            rmse_lasso = sqrt(mean((HEALTH_lasso - HEALTH_STATUS_CTS)^2)))
-
-
-
-```
-
-# Overfitting
+# Example 2: Overfitting
 
 ```{r}
 library(ranger)
