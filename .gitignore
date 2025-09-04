@@ -32,6 +32,12 @@ vignettes/*.pdf
 *_cache/
 /cache/
 
+# Output files
+*_files/
+*.html
+*.pdf
+*.docx
+
 # Temporary files created by R markdown
 *.utf8.md
 *.knit.md
