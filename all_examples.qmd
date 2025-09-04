@@ -19,7 +19,7 @@ We're going to use a simple dataset linking individual health and demographic in
 ```{r}
 ## Read in the data
 
-stroke <- read_csv("G:/My Drive/teaching/PUBH 7463/data/stroke.csv") %>% 
+stroke <- read_csv("./stroke.csv") %>% 
   select(stroke, gender, age, hypertension)
 
 head(stroke)
@@ -72,7 +72,7 @@ library(pROC)
 We'll start by reading in the stroke dataset again, using a few more variables this time.
 
 ```{r}
-stroke <- read_csv("G:/My Drive/teaching/PUBH 7463/data/stroke.csv") %>%
+stroke <- read_csv("./stroke.csv") %>%
   mutate(stroke = factor(stroke),
          across(c(gender, ever_married, work_type, Residence_type, smoking_status), as.factor)) %>%
   filter(gender != "Other") ## To avoid fitting issues
