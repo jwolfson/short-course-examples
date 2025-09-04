@@ -1,0 +1,244 @@
+---
+title: "Short Course Examples"
+format: 
+  html:
+    warning: false
+    message: false
+editor: visual
+---
+
+# Logistic Regression
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+We're going to use a simple dataset linking individual health and demographic information to stroke risk:
+
+```{r}
+## Read in the data
+
+stroke <- read_csv("G:/My Drive/teaching/PUBH 7463/data/stroke.csv") %>% 
+  select(stroke, gender, age, hypertension)
+
+head(stroke)
+```
+
+We start by fiitting a standard logistic regression model:
+
+```{r}
+# Fit a logistic regression model
+pred_model <- glm(stroke ~ gender + age + hypertension,
+                  data = stroke,
+                  family = "binomial")
+
+summary(pred_model)
+```
+
+That's it, we've got our prediction model! Now to get predicted (i.e., fitted) values for our original sample, we can use the `predict` function:
+
+```{r}
+hist(predict(pred_model, type = "response"))
+
+
+```
+
+To make a prediction for a "new" individual, we do:
+
+```{r}
+# Make a prediction for a "new" individual:
+new_data <- data.frame(gender = "Female",
+                       age = 78,
+                       hypertension = 1)
+
+new_pred <- predict(pred_model, 
+                    newdata = new_data, 
+                    type = "response")
+
+new_pred
+```
+
+# Linear Regression & the Lasso
+
+```{r}
+nhis <- read_csv("../../data/nhis_flu_train_21_22.csv") %>%
+  filter(PHSTAT_A != "Unknown") %>%
+  mutate(across(-c(AGEP_A, PCNT18UPTC, PCNTLT18TC), as.factor),
+         HEALTH_STATUS_CTS = factor(PHSTAT_A, 
+                                    levels = c("Poor", "Fair", "Good", "Very Good", "Excellent")) %>% as.integer)
+
+## Do the linear regression
+LM <- lm(HEALTH_STATUS_CTS ~ AGEP_A + SEX_A + PCNT18UPTC + PCNTLT18TC + MARSTAT_A + DIBEV_A + COPDEV_A, data = nhis)
+tidy(LM)
+
+### Get the predictions
+preds <- predict(LM)
+nhis <- nhis %>% mutate(HEALTH_pred = preds)
+
+nhis %>%
+  ggplot(aes(x = HEALTH_pred)) +
+  geom_histogram() +
+#  geom_density() +
+  theme_minimal()
+
+nhis %>%
+  ggplot(aes(x = HEALTH_pred, y = HEALTH_STATUS_CTS)) +
+  geom_point(color = "blue", alpha = 0.3) +
+  geom_smooth(se = FALSE) +
+  geom_abline(slope = 1, intercept = 0, size = 1) +
+  theme_minimal()
+
+
+```
+
+```{r}
+## Do the Lasso
+
+library(glmnet)
+
+Y <- nhis$HEALTH_STATUS_CTS
+X <- model.matrix(LM)
+
+lasso <- glmnet(X, Y, family = "gaussian", alpha = 1)
+print(lasso)
+coef(lasso, s = 0.3)
+coef(lasso, s = 0.1)
+
+lasso_cv <- cv.glmnet(X, Y, family = "gaussian", alpha = 1)
+plot(lasso_cv)
+lasso_cv
+
+coef(lasso, s = lasso_cv$lambda.min)
+coef(lasso, s = lasso_cv$lambda.1se)
+
+preds_lasso <- predict(lasso, newx = X, s = lasso_cv$lambda.1se)
+
+nhis <- nhis %>%
+  mutate(HEALTH_lasso = preds_lasso)
+
+nhis %>%
+  summarise(rmse_LM = sqrt(mean((HEALTH_pred - HEALTH_STATUS_CTS)^2)),
+            rmse_lasso = sqrt(mean((HEALTH_lasso - HEALTH_STATUS_CTS)^2)))
+
+## Try it again with a smaller number of observations
+
+nhis_small <- nhis %>% slice(1:250) %>%
+  filter(SEX_A != "Unknown",
+         MARSTAT_A != "Unknown",
+         DIBEV_A != "Unknown",
+         COPDEV_A != "Unknown")
+nhis_small_test <- nhis %>% slice(251:nrow(nhis)) %>%
+  filter(SEX_A != "Unknown",
+         MARSTAT_A != "Unknown",
+         DIBEV_A != "Unknown",
+         COPDEV_A != "Unknown")
+
+LM <- lm(HEALTH_STATUS_CTS ~ AGEP_A + SEX_A + PCNT18UPTC + PCNTLT18TC + MARSTAT_A + DIBEV_A + COPDEV_A, data = nhis_small)
+tidy(LM)
+
+LM_test <- lm(HEALTH_STATUS_CTS ~ AGEP_A + SEX_A + PCNT18UPTC + PCNTLT18TC + MARSTAT_A + DIBEV_A + COPDEV_A, data = nhis_small_test)
+
+### Get the predictions
+preds <- predict(LM, newdata = nhis_small_test)
+
+Y <- nhis_small$HEALTH_STATUS_CTS
+X <- model.matrix(LM)
+
+lasso <- glmnet(X, Y, family = "gaussian", alpha = 1)
+lasso_cv <- cv.glmnet(X, Y, family = "gaussian", alpha = 1)
+plot(lasso_cv)
+
+preds_lasso <- predict(lasso, newx = model.matrix(LM_test)[, colnames(X)], 
+                       s = lasso_cv$lambda.min)
+
+nhis_small_test <- nhis_small_test %>%
+  mutate(HEALTH_pred = preds,
+         HEALTH_lasso = preds_lasso)
+
+nhis_small_test %>%
+  summarise(rmse_LM = sqrt(mean((HEALTH_pred - HEALTH_STATUS_CTS)^2)),
+            rmse_lasso = sqrt(mean((HEALTH_lasso - HEALTH_STATUS_CTS)^2)))
+
+
+
+```
+
+# Overfitting
+
+```{r}
+library(ranger)
+library(gbm)
+library(rpart)
+library(pROC)
+
+```
+
+We'll start by reading in the stroke dataset again, using a few more variables this time.
+
+```{r}
+stroke <- read_csv("G:/My Drive/teaching/PUBH 7463/data/stroke.csv") %>%
+  mutate(stroke = factor(stroke),
+         across(c(gender, ever_married, work_type, Residence_type, smoking_status), as.factor)) %>%
+  filter(gender != "Other") ## To avoid fitting issues
+
+```
+
+Next, we'll split it into two random subsets (we'll see why in a minute):
+
+```{r}
+## Random half of the data
+stroke_1 <- stroke %>% sample_frac(0.5)
+
+## Other half of the data
+stroke_2 <- stroke %>% 
+  filter(!(id %in% stroke_1$id))
+```
+
+Now, let's fit two prediction models (a logistic regression and a random forest) on the first random partition of the data, get the corresponding predictions, and calculate the AUCs:
+
+```{r}
+##### Fit the models on stroke_1 and get predictions (on stroke_1)
+
+## Logistic regression model
+M1 <- glm(stroke ~ . -id, data = stroke_1, family = "binomial")
+pred_M1 <- predict(M1, type = "response")
+
+## Random forest
+M2 <- ranger(stroke ~ . -id, probability = TRUE,
+             data = stroke_1)
+pred_M2 <- predict(M2, data = stroke_1, type = "response")$predictions[, 2]
+
+## Add the predictions to the dataset
+stroke_1_pred <- stroke_1 %>%
+  mutate(pred_M1 = pred_M1,
+         pred_M2 = pred_M2)
+
+## Calculate the AUCs
+roc(stroke ~ pred_M1, data = stroke_1_pred)$auc
+roc(stroke ~ pred_M2, data = stroke_1_pred)$auc
+
+```
+
+OK, now we apply the models fitted to the first partition to make predictions on data from the second partition:
+
+```{r}
+##### Use the models fitted on stroke_1 to get predictions on stroke_2
+
+pred_M1_new <- predict(M1, 
+                       newdata = stroke_2,
+                       type = "response")
+
+pred_M2_new <- predict(M2, 
+                   data = stroke_2,
+                   type = "response")$predictions[, 2]
+
+## Add the predictions to the dataset
+stroke_2_pred <- stroke_2 %>%
+  mutate(pred_M1_new = pred_M1_new,
+         pred_M2_new = pred_M2_new)
+
+## Re-calculate the AUCs
+roc(stroke ~ pred_M1_new, data = stroke_2_pred)$auc
+roc(stroke ~ pred_M2_new, data = stroke_2_pred)$auc
+```
